@@ -1,20 +1,31 @@
 import streamlit as st
+import tensorflow as tf
 import pandas as pd 
+import joblib
 from sklearn.preprocessing import MinMaxScaler
 import numpy as np
 import pickle
 from tensorflow.keras.models import load_model
 import matplotlib.pyplot as plt
 import os
+import sys
+import codecs
+
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 
 # Load the trained LSTM model and scaler
 # @st.cache_data(allow_output_mutation=True)
 def load_model_and_scaler():
-    model = load_model('./models/best_model_weights.keras')  # Update with correct model path
-    with open('./models/minmax_scaler.pkl', 'rb') as f:
-        scaler = pickle.load(f)
-    return model, scaler
+    tf.random.set_seed(42)
+    try:
+        model = load_model('./models/best_model_weights.keras')  # Update with correct model path
+        scaler = joblib.load('./models/minmax_scaler.pkl')
+        return model, scaler
+    except Exception as e:
+        print(f"Error loading model: {e}")
+    
 
 # Preprocess the data similar to your notebook preprocessing
 def preprocess2(df):
@@ -90,6 +101,8 @@ def preprocess_data(df, scaler):
 
 
 
+
+
 # Predict the traffic using the LSTM model
 def make_predictions(model, data):
     predictions = model.predict(data)
@@ -103,12 +116,131 @@ def inverse_transform(predictions, scaler):
     predicted_temp = scaler.inverse_transform(prediction_copies)[:,0]
     return predicted_temp
 
+
+    st.title("University Traffic Forecasting with LSTM")
+    
+    # Load model and scaler
+    model, scaler = load_model_and_scaler()
+    
+    # Add inputs for manual data entry of previous values (Datetime, Average_Receive_bps, Average_Transmit_bps)
+    st.write("Enter the last 4 data points for prediction:")
+    
+    dates = []
+    avg_receive_bps = []
+    avg_transmit_bps = []
+
+    for i in range(10):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            date = st.date_input(f"Date {i+1}", key=f"date_{i}")
+            time = st.time_input(f"Time {i+1}", key=f"time_{i}")
+            datetime_input = pd.to_datetime(f"{date} {time}")
+            dates.append(datetime_input)
+        
+        with col2:
+            receive_bps = st.number_input(f"Average_Receive_bps {i+1}", key=f"receive_bps_{i}")
+            avg_receive_bps.append(receive_bps)
+        
+        with col3:
+            transmit_bps = st.number_input(f"Average_Transmit_bps {i+1}", key=f"transmit_bps_{i}")
+            avg_transmit_bps.append(transmit_bps)
+
+    # Create a DataFrame from the input values
+    if st.button("Predict"):
+        model, scaler = load_model_and_scaler()
+        df_input = pd.DataFrame({
+            'Datetime': dates,
+            'Average_Receive_bps': avg_receive_bps,
+            'Average_Transmit_bps': avg_transmit_bps
+        })
+
+        # Display the input data
+        st.write("Input Data for Prediction:")
+        st.dataframe(df_input)
+
+        # # Preprocess the input data
+        X_new, original_data = preprocess_data(df_input, scaler) 
+      
+
+        # Make predictions
+        predictions = make_predictions(model, X_new)
+
+        # Inverse transform to get the actual values
+        predicted_value = inverse_transform(predictions, scaler)
+
+        # Display the predicted result
+        st.write(f"Predicted Average_Receive_bps: {predicted_value[0]}")
+
+        # Plot the data
+        plt.figure(figsize=(8, 4))
+        plt.plot(original_data['Datetime'], original_data['Average_Receive_bps'], label="Original Data", color="blue")
+        plt.scatter(original_data['Datetime'].iloc[-1], predicted_value[0], color="red", label="Predicted Value")
+        plt.title("Traffic Forecasting")
+        plt.xlabel("Datetime")
+        plt.ylabel("Average_Receive_bps")
+        plt.legend()
+        st.pyplot(plt)
+
+
+def Forecast(scaler, model):
+    
+    st.write("Enter the last 10 data points for prediction:")
+    uploaded_forcast = st.file_uploader("Upload up to 10 recent traffic", type=["csv"])
+    
+    if uploaded_forcast is not None:
+        st.write("Predicting:")
+        try:
+            # Load the CSV data
+            df = pd.read_csv(uploaded_forcast)
+            st.write("Uploaded Data:")
+
+            # Ensure 'Datetime' column is in datetime format
+            df['Datetime'] = pd.to_datetime(df['Datetime'])
+
+            # Check if the dataframe has at least 10 rows
+            if len(df) >= 10:
+                # Pick the last 10 rows from the dataframe
+                last_10_rows = df[['Average_Receive_bps', 'Average_Transmit_bps']].tail(10)
+                st.write("Last 10 rows of the data to be used for forecasting:")
+                st.dataframe(last_10_rows)
+                df_scaled = scaler.transform(last_10_rows[['Average_Receive_bps', 'Average_Transmit_bps']])
+
+                # Reshape the data to be compatible with LSTM input shape (samples, timesteps, features)
+                n_steps = 10  # The sequence length used during training
+                X_new = df_scaled.reshape((1, n_steps, df_scaled.shape[1])) 
+                predicted_scaled_value = model.predict(X_new, verbose=0)
+                mean_average_transmit_bps = np.mean(X_new[0][:, 1])  # Taking the mean of the second column
+
+                # Create a dummy array with the predicted value and the calculated mean
+                dummy_array = np.array([[predicted_scaled_value[0][0], mean_average_transmit_bps]])
+
+                # Inverse transform the predictions
+                inverse_scaled_value = scaler.inverse_transform(dummy_array)
+
+                # Extract the predicted 'Average_Receive_bps' (assuming it is the first feature)
+                Predicted_Average_Receive_bp = inverse_scaled_value[0][0]  # This retrieves the first feature from the inverse transformation
+                Predicted_Average_Transmit_bp = inverse_scaled_value[0][1]
+
+                st.write(f"Predicted Average_Receive_bps: {Predicted_Average_Receive_bp}")
+                st.write(f"Predicted Average_Transmit_bps: {Predicted_Average_Transmit_bp}")
+            else:
+                st.warning("We need at least 10 previous data points to forecast.")
+
+        except FileNotFoundError:
+            st.error("File not found. Please upload the data.")
+    else:
+        st.write("Please upload a file to proceed with forecasting.")
+
+
+
 # Main Streamlit app
 def main():
     st.title("University Traffic Forecasting with LSTM")
     
     # Load model and scaler
     model, scaler = load_model_and_scaler()
+    
     
     # File uploader to upload traffic data
     uploaded_file = st.file_uploader("Upload your traffic data CSV", type=["csv"])
@@ -126,28 +258,9 @@ def main():
         test_x, test_y,scaler2, new_df = preprocess2(df)
         print(test_x)
         Predictor(test_x, test_y, scaler2, model,new_df)
-        # data_scaled, original = preprocess_data(df, scaler)
-        
-        # # Make predictions
-        # predictions = make_predictions(model, data_scaled)
-        # print(predictions)
-        
-        # # # # Denormalize predictions
-        # traffic_forecast = inverse_transform(predictions, scaler)
-        # print(traffic_forecast)
-        
-        # df_scaled_last_n_steps['Predicted_Average_Receive_bps'] = traffic_forecast
-        # st.write("Predicted Traffic:")
-        # st.dataframe(df_scaled_last_n_steps[[ 'Average_Receive_bps', 'Average_Transmit_bps', 'Predicted_Average_Receive_bps']])
-        
-        # # Plotting the results
-        # st.write("Traffic Forecasting Plot:")
-        # plt.figure(figsize=(10, 6))
-        # plt.plot(df_scaled_last_n_steps['Predicted_Average_Receive_bps'], label='Predicted Traffic')
-        # plt.xlabel('Time')
-        # plt.ylabel('Traffic (bps)')
-        # plt.legend()
-        # st.pyplot(plt)
+
+    
+    Forecast(scaler, model)
 
 if __name__ == "__main__":
     main()
