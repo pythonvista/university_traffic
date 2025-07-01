@@ -117,7 +117,7 @@ def inverse_transform(predictions, scaler):
     return predicted_temp
 
 
-     st.title("University Network Prediction Using RAE (Recurrent Autoencoder) and Genetic Algorithm")
+    st.title("University Network Prediction Using RAE (Recurrent Autoencoder) and Genetic Algorithm")
     
     # Load model and scaler
     model, scaler = load_model_and_scaler()
