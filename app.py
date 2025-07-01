@@ -117,7 +117,7 @@ def inverse_transform(predictions, scaler):
     return predicted_temp
 
 
-    st.title("University Traffic Forecasting with LSTM")
+    st.title("University Network Prediction Using RAE (Recurrent Autoencoder)")
     
     # Load model and scaler
     model, scaler = load_model_and_scaler()
@@ -236,7 +236,7 @@ def Forecast(scaler, model):
 
 # Main Streamlit app
 def main():
-    st.title("University Traffic Forecasting with LSTM")
+    st.title("University Network Prediction Using RAE (Recurrent Autoencoder)")
     
     # Load model and scaler
     model, scaler = load_model_and_scaler()
